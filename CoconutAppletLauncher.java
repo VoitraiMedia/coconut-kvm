@@ -52,11 +52,10 @@ public class CoconutAppletLauncher extends JFrame implements AppletStub, AppletC
 
         if (embed) {
             setUndecorated(true);
-            setResizable(true);
-            setSize(captureW, captureH);
-            setLocation(-10000, -10000);
+            setExtendedState(JFrame.MAXIMIZED_BOTH);
             applet.setPreferredSize(new Dimension(captureW, captureH));
             setJMenuBar(null);
+            installScrollLockListener();
         } else {
             // Standalone mode: fullscreen, undecorated
             setUndecorated(true);
