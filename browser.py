@@ -25,6 +25,7 @@ _CHROMIUM_BASE_FLAGS = [
     "--allow-running-insecure-content",
     "--disable-web-security",
     "--reduce-security-for-testing",
+    "--no-sandbox",
 ]
 sys.argv += _CHROMIUM_BASE_FLAGS
 

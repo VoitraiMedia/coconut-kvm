@@ -295,6 +295,14 @@ cat > /usr/local/bin/coconut-browser << 'BIN2_EOF'
 # Launch the Coconut GUI browser (requires desktop/X11)
 source /etc/coconut.env 2>/dev/null
 export COCONUT_TARGET COCONUT_PORT OPENSSL_CONF
+
+# Fix XDG_RUNTIME_DIR if not set (common when running as root or via sudo)
+if [[ -z "$XDG_RUNTIME_DIR" ]]; then
+    export XDG_RUNTIME_DIR="/tmp/runtime-$(id -u)"
+    mkdir -p "$XDG_RUNTIME_DIR"
+    chmod 700 "$XDG_RUNTIME_DIR"
+fi
+
 exec python3 /opt/coconut/browser.py "$@"
 BIN2_EOF
 chmod +x /usr/local/bin/coconut-browser
