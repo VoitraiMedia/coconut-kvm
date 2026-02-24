@@ -1719,59 +1719,41 @@ class BrowserWindow(QMainWindow):
         else:
             print("[Coconut] Non-Linux — KVM in separate window", flush=True)
 
-    # ── X11 KVM embedding ─────────────────────────────────────────────
+    # ── X11 KVM embedding (xdotool windowreparent) ──────────────────
+
+    def _xdotool(self, *args):
+        """Run xdotool and return stdout."""
+        r = subprocess.run(["xdotool"] + list(args),
+                           capture_output=True, text=True, timeout=3)
+        return r.stdout.strip()
 
     def _find_java_xid(self):
-        """Find the Java window's X11 ID by PID using multiple strategies."""
+        """Find the Java window's X11 window ID."""
         pid = str(self._kvm_proc.pid)
-
-        # Strategy 1: xdotool search by PID
-        if shutil.which("xdotool"):
-            for search in [
-                ["xdotool", "search", "--pid", pid, "--name", "CoconutKVM"],
-                ["xdotool", "search", "--pid", pid],
-            ]:
-                try:
-                    r = subprocess.run(search, capture_output=True, text=True, timeout=2)
-                    wids = [w.strip() for w in r.stdout.strip().split('\n') if w.strip()]
-                    if wids:
-                        return int(wids[-1])
-                except Exception:
-                    pass
-
-        # Strategy 2: wmctrl
-        if shutil.which("wmctrl"):
+        searches = [
+            ["search", "--pid", pid, "--name", "CoconutKVM"],
+            ["search", "--pid", pid],
+            ["search", "--name", "CoconutKVM"],
+        ]
+        for args in searches:
             try:
-                r = subprocess.run(["wmctrl", "-lp"], capture_output=True, text=True, timeout=2)
-                for line in r.stdout.strip().split('\n'):
-                    parts = line.split()
-                    if len(parts) >= 3 and parts[2] == pid:
-                        return int(parts[0], 16)
-            except Exception:
-                pass
-
-        # Strategy 3: xdotool search by name only
-        if shutil.which("xdotool"):
-            try:
-                r = subprocess.run(
-                    ["xdotool", "search", "--name", "CoconutKVM"],
-                    capture_output=True, text=True, timeout=2)
-                wids = [w.strip() for w in r.stdout.strip().split('\n') if w.strip()]
+                out = self._xdotool(*args)
+                wids = [w for w in out.split('\n') if w.strip()]
                 if wids:
-                    return int(wids[-1])
+                    xid = int(wids[-1])
+                    print(f"[Coconut] xdotool {' '.join(args)} -> {xid}", flush=True)
+                    return xid
             except Exception:
                 pass
-
         return None
 
     def _try_embed_java_window(self):
-        """Find the Java KVM window and embed it inside the browser."""
+        """Find the Java window and reparent it into our Qt widget using X11."""
         self._embed_attempts += 1
         if self._embed_attempts > 30:
             self._embed_timer.stop()
-            print("[Coconut] Could not find Java window after 15s — running standalone", flush=True)
+            print("[Coconut] Could not find Java window after 15s", flush=True)
             return
-
         if self._kvm_proc.poll() is not None:
             self._embed_timer.stop()
             return
@@ -1783,19 +1765,15 @@ class BrowserWindow(QMainWindow):
             return
 
         self._embed_timer.stop()
-        print(f"[Coconut] Found Java window XID={xid} (0x{xid:x}), embedding…", flush=True)
+        self._kvm_xid = xid
+        print(f"[Coconut] Found Java window XID={xid}, reparenting via X11…", flush=True)
 
         try:
-            from PyQt5.QtGui import QWindow
-
-            foreign = QWindow.fromWinId(xid)
-            container = QWidget.createWindowContainer(foreign, self)
-
-            # Build the KVM panel: back button bar + embedded viewer
+            # Build the KVM panel: back button bar + container for Java window
             kvm_panel = QWidget(self)
-            layout = QVBoxLayout(kvm_panel)
-            layout.setContentsMargins(0, 0, 0, 0)
-            layout.setSpacing(0)
+            panel_layout = QVBoxLayout(kvm_panel)
+            panel_layout.setContentsMargins(0, 0, 0, 0)
+            panel_layout.setSpacing(0)
 
             # Back button bar
             bar = QWidget()
@@ -1823,38 +1801,68 @@ class BrowserWindow(QMainWindow):
             bar_layout.addWidget(back_btn)
 
             port_label = QLabel(f"  KVM: {getattr(self, '_kvm_port_name', 'Remote Console')}")
-            port_label.setStyleSheet(f"color: #4ade80; font-weight: bold; font-size: 13px;")
+            port_label.setStyleSheet("color: #4ade80; font-weight: bold; font-size: 13px;")
             bar_layout.addWidget(port_label)
-
             bar_layout.addStretch()
 
-            layout.addWidget(bar)
-            layout.addWidget(container, 1)
+            # Native container widget — this gets an X11 window we can reparent into
+            container = QWidget()
+            container.setAttribute(Qt.WA_NativeWindow, True)
+            container.setMinimumSize(640, 480)
+
+            panel_layout.addWidget(bar)
+            panel_layout.addWidget(container, 1)
 
             self._kvm_panel = kvm_panel
             self._kvm_container = container
-            self._kvm_foreign = foreign
-            self._kvm_xid = xid
 
-            # Hide tabs + toolbar, show KVM panel as central content
+            # Swap out tabs for the KVM panel
             self.tabs.hide()
             kvm_panel.setParent(self)
             kvm_panel.setGeometry(self.centralWidget().geometry())
             kvm_panel.show()
             kvm_panel.raise_()
-            container.setFocus()
 
+            # Force the container to create its native X11 window
+            container.show()
+            QApplication.processEvents()
+
+            parent_wid = int(container.winId())
+            print(f"[Coconut] Container WID={parent_wid}, reparenting Java XID={xid}…", flush=True)
+
+            # X11 reparent: move the Java window into our container
+            self._xdotool("windowreparent", str(xid), str(parent_wid))
+            self._xdotool("windowmove", "--relative", str(xid), "0", "0")
+            self._xdotool("windowsize", str(xid),
+                          str(container.width()), str(container.height()))
+            self._xdotool("windowactivate", str(xid))
+            self._xdotool("windowfocus", str(xid))
+
+            # Poll for Java process exit + resize tracking
             self._kvm_poll = QTimer(self)
             self._kvm_poll.timeout.connect(self._check_kvm_proc)
             self._kvm_poll.start(500)
 
             self.status.showMessage("KVM connected", 0)
-            print("[Coconut] Java window embedded successfully", flush=True)
+            print("[Coconut] Java window embedded via X11 reparent", flush=True)
 
         except Exception as e:
             print(f"[Coconut] Embed failed: {e}", flush=True)
             import traceback
             traceback.print_exc()
+
+    def _resize_embedded_kvm(self):
+        """Resize the embedded Java window to match the container."""
+        if not hasattr(self, '_kvm_xid') or not self._kvm_xid:
+            return
+        if not hasattr(self, '_kvm_container') or not self._kvm_container:
+            return
+        try:
+            w = self._kvm_container.width()
+            h = self._kvm_container.height()
+            self._xdotool("windowsize", str(self._kvm_xid), str(w), str(h))
+        except Exception:
+            pass
 
     def _kvm_back(self):
         """User clicked Back — kill Java and return to browser."""
@@ -1886,7 +1894,13 @@ class BrowserWindow(QMainWindow):
             self._kvm_panel = None
 
         self._kvm_container = None
-        self._kvm_foreign = None
+        self._kvm_xid = None
+
+        if self._kvm_proc and self._kvm_proc.poll() is None:
+            try:
+                self._kvm_proc.terminate()
+            except Exception:
+                pass
         self._kvm_proc = None
 
         self.tabs.show()
@@ -1943,6 +1957,7 @@ class BrowserWindow(QMainWindow):
         super().resizeEvent(event)
         if hasattr(self, '_kvm_panel') and self._kvm_panel:
             self._kvm_panel.setGeometry(self.centralWidget().geometry())
+            QTimer.singleShot(50, self._resize_embedded_kvm)
 
     def _find_java(self):
         """Find a Java binary, preferring JDK 11 (has Applet API)."""
