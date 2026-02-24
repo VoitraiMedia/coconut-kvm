@@ -1,0 +1,9 @@
+# Coconut KVM — override to enable TLS 1.0 for legacy Raritan devices
+# Only TLSv1 and TLSv1.1 are removed from the disabled list
+jdk.tls.disabledAlgorithms=SSLv3, RC4, DES, \
+    DES40_CBC, RC4_40, 3DES_EDE_CBC, anon, NULL, \
+    DH keySize < 768, EC keySize < 224
+
+# Allow legacy key sizes
+jdk.certpath.disabledAlgorithms=MD2, MD5, SHA1 jdkCA & usage TLSServer, \
+    RSA keySize < 1024, DSA keySize < 1024, EC keySize < 224

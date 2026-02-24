@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.class
+*.jar
+*.pem
+*.key
+.coconut/
+coconut-deploy.tar.gz
+.DS_Store
