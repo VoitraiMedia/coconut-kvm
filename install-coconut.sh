@@ -347,6 +347,24 @@ StartupWMClass=Coconut
 DESKTOP_EOF
 chmod 644 /usr/share/applications/coconut-browser.desktop
 
+# XDG autostart — launches browser GUI automatically on desktop login
+mkdir -p /etc/xdg/autostart
+cat > /etc/xdg/autostart/coconut-browser.desktop << 'AUTOSTART_EOF'
+[Desktop Entry]
+Type=Application
+Name=Coconut
+Comment=KVM Browser for Raritan Equipment
+Exec=/usr/local/bin/coconut-browser
+Icon=/usr/share/pixmaps/coconut.png
+Terminal=false
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=5
+StartupWMClass=Coconut
+Categories=Network;RemoteAccess;
+AUTOSTART_EOF
+chmod 644 /etc/xdg/autostart/coconut-browser.desktop
+info "Browser will auto-launch on desktop login"
+
 # Desktop shortcut (visible on the desktop)
 REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo $USER)}"
 REAL_HOME=$(eval echo "~$REAL_USER")
