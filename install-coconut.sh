@@ -312,6 +312,28 @@ chmod +x /usr/local/bin/coconut-browser
 
 info "Created commands: coconut-proxy, coconut-browser"
 
+# ── Desktop shortcut ─────────────────────────────────────────────────────────
+step "Creating desktop launcher"
+
+if [[ -f "$INSTALL_DIR/coconut-icon.png" ]]; then
+    cp "$INSTALL_DIR/coconut-icon.png" /usr/share/pixmaps/coconut.png
+fi
+
+cat > /usr/share/applications/coconut-browser.desktop << 'DESKTOP_EOF'
+[Desktop Entry]
+Name=Coconut
+Comment=KVM Browser for Raritan Equipment
+Exec=/usr/local/bin/coconut-browser
+Icon=coconut
+Type=Application
+Categories=Network;RemoteAccess;
+Terminal=false
+StartupWMClass=coconut
+DESKTOP_EOF
+chmod 644 /usr/share/applications/coconut-browser.desktop
+
+info "Created desktop launcher (find 'Coconut' in your app menu)"
+
 # ── Get LAN IP ───────────────────────────────────────────────────────────────
 LAN_IP=$(python3 -c "
 import socket

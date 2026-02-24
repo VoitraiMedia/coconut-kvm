@@ -2066,6 +2066,10 @@ def main():
     app.setOrganizationName("Coconut")
     app.setStyleSheet(STYLESHEET)
 
+    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coconut-icon.png")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+
     print("[Coconut] Starting — deployJava setter trap + applet stubs active", flush=True)
 
     window = BrowserWindow()
