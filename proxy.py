@@ -453,6 +453,11 @@ class CoconutProxyHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print(f"[Proxy] {fmt % args}", flush=True)
 
+    def _proxy_origin(self):
+        """Return the origin URL that the client used to reach this proxy."""
+        host_hdr = self.headers.get("Host", f"localhost:{LISTEN_PORT}")
+        return f"https://{host_hdr}"
+
     def _proxy_request(self, method):
         # Handle the launch API endpoint
         if self.path == "/__coconut_launch__":
@@ -509,9 +514,10 @@ class CoconutProxyHandler(http.server.BaseHTTPRequestHandler):
                                  "content-encoding", "connection"):
                     continue
                 if lower_key == "location":
-                    val = val.replace(f"https://{TARGET_HOST}:{TARGET_PORT}", f"https://localhost:{LISTEN_PORT}")
-                    val = val.replace(f"https://{TARGET_HOST}", f"https://localhost:{LISTEN_PORT}")
-                    val = val.replace(f"http://{TARGET_HOST}", f"https://localhost:{LISTEN_PORT}")
+                    proxy_origin = self._proxy_origin()
+                    val = val.replace(f"https://{TARGET_HOST}:{TARGET_PORT}", proxy_origin)
+                    val = val.replace(f"https://{TARGET_HOST}", proxy_origin)
+                    val = val.replace(f"http://{TARGET_HOST}", proxy_origin)
                 if lower_key == "set-cookie":
                     val = val.replace("; Secure", "")
                 self.send_header(key, val)
@@ -534,9 +540,10 @@ class CoconutProxyHandler(http.server.BaseHTTPRequestHandler):
             return body
 
         # Rewrite references to the target host to go through proxy
-        text = text.replace(f"https://{TARGET_HOST}:{TARGET_PORT}", f"https://localhost:{LISTEN_PORT}")
-        text = text.replace(f"https://{TARGET_HOST}", f"https://localhost:{LISTEN_PORT}")
-        text = text.replace(f"http://{TARGET_HOST}", f"https://localhost:{LISTEN_PORT}")
+        proxy_origin = self._proxy_origin()
+        text = text.replace(f"https://{TARGET_HOST}:{TARGET_PORT}", proxy_origin)
+        text = text.replace(f"https://{TARGET_HOST}", proxy_origin)
+        text = text.replace(f"http://{TARGET_HOST}", proxy_origin)
 
         # Strip meta refresh redirects to Java download sites
         text = re.sub(
