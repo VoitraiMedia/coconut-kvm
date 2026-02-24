@@ -129,13 +129,42 @@ Icon=coconut
 Terminal=false
 X-GNOME-Autostart-enabled=true
 X-GNOME-Autostart-Delay=5
-StartupWMClass=coconut
+StartupWMClass=Coconut
 Categories=Network;RemoteAccess;
 EOF
 info "Browser will auto-launch on desktop login"
 
 # Also put in the app menu
 cp /etc/xdg/autostart/coconut-browser.desktop /usr/share/applications/coconut-browser.desktop 2>/dev/null || true
+
+# Install icon to hicolor theme so taskbar/dock picks it up
+INSTALL_DIR="/opt/coconut"
+if [[ -f "$INSTALL_DIR/coconut-icon.png" ]]; then
+    cp "$INSTALL_DIR/coconut-icon.png" /usr/share/pixmaps/coconut.png
+    for size in 256 128 64 48; do
+        icon_dir="/usr/share/icons/hicolor/${size}x${size}/apps"
+        mkdir -p "$icon_dir"
+        if command -v convert &>/dev/null; then
+            convert "$INSTALL_DIR/coconut-icon.png" -resize "${size}x${size}" "$icon_dir/coconut.png"
+        else
+            cp "$INSTALL_DIR/coconut-icon.png" "$icon_dir/coconut.png"
+        fi
+    done
+    gtk-update-icon-cache /usr/share/icons/hicolor 2>/dev/null || true
+fi
+
+# Desktop shortcut
+REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo $USER)}"
+REAL_HOME=$(eval echo "~$REAL_USER")
+DESKTOP_DIR="$REAL_HOME/Desktop"
+if [[ -d "$DESKTOP_DIR" ]]; then
+    cp /usr/share/applications/coconut-browser.desktop "$DESKTOP_DIR/coconut-browser.desktop"
+    chown "$REAL_USER:$REAL_USER" "$DESKTOP_DIR/coconut-browser.desktop"
+    chmod +x "$DESKTOP_DIR/coconut-browser.desktop"
+    sudo -u "$REAL_USER" gio set "$DESKTOP_DIR/coconut-browser.desktop" \
+        metadata::trusted true 2>/dev/null || true
+    info "Placed Coconut shortcut on desktop"
+fi
 
 # ── Convenience commands ─────────────────────────────────────────────────────
 step "Creating commands"

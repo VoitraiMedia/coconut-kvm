@@ -316,9 +316,24 @@ info "Created commands: coconut-proxy, coconut-browser"
 step "Creating desktop launcher"
 
 if [[ -f "$INSTALL_DIR/coconut-icon.png" ]]; then
+    # Install icon to all standard locations so desktop environments find it
     cp "$INSTALL_DIR/coconut-icon.png" /usr/share/pixmaps/coconut.png
+
+    for size in 256 128 64 48; do
+        icon_dir="/usr/share/icons/hicolor/${size}x${size}/apps"
+        mkdir -p "$icon_dir"
+        if command -v convert &>/dev/null; then
+            convert "$INSTALL_DIR/coconut-icon.png" -resize "${size}x${size}" "$icon_dir/coconut.png"
+        else
+            cp "$INSTALL_DIR/coconut-icon.png" "$icon_dir/coconut.png"
+        fi
+    done
+
+    # Refresh icon cache
+    gtk-update-icon-cache /usr/share/icons/hicolor 2>/dev/null || true
 fi
 
+# App menu entry
 cat > /usr/share/applications/coconut-browser.desktop << 'DESKTOP_EOF'
 [Desktop Entry]
 Name=Coconut
@@ -328,11 +343,25 @@ Icon=coconut
 Type=Application
 Categories=Network;RemoteAccess;
 Terminal=false
-StartupWMClass=coconut
+StartupWMClass=Coconut
 DESKTOP_EOF
 chmod 644 /usr/share/applications/coconut-browser.desktop
 
-info "Created desktop launcher (find 'Coconut' in your app menu)"
+# Desktop shortcut (visible on the desktop)
+REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo $USER)}"
+REAL_HOME=$(eval echo "~$REAL_USER")
+DESKTOP_DIR="$REAL_HOME/Desktop"
+if [[ -d "$DESKTOP_DIR" ]]; then
+    cp /usr/share/applications/coconut-browser.desktop "$DESKTOP_DIR/coconut-browser.desktop"
+    chown "$REAL_USER:$REAL_USER" "$DESKTOP_DIR/coconut-browser.desktop"
+    chmod +x "$DESKTOP_DIR/coconut-browser.desktop"
+    # Mark as trusted so GNOME doesn't show "untrusted" warning
+    sudo -u "$REAL_USER" gio set "$DESKTOP_DIR/coconut-browser.desktop" \
+        metadata::trusted true 2>/dev/null || true
+    info "Placed Coconut shortcut on desktop"
+fi
+
+info "Created app menu entry and desktop icon"
 
 # ── Open firewall port ───────────────────────────────────────────────────────
 step "Configuring firewall"

@@ -2064,9 +2064,12 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Coconut")
     app.setOrganizationName("Coconut")
+    app.setDesktopFileName("coconut-browser")
     app.setStyleSheet(STYLESHEET)
 
     icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coconut-icon.png")
+    if not os.path.exists(icon_path):
+        icon_path = "/usr/share/pixmaps/coconut.png"
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
 
