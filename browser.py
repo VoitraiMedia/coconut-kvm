@@ -1143,53 +1143,46 @@ class ProxyManager:
         ip = _get_lan_ip()
         return f"https://{ip}:{self._listen_port}"
 
-    def _port_in_use(self):
-        """Check if our listen port is already bound by another process."""
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            s.bind(("0.0.0.0", self._listen_port))
-            s.close()
-            return False
-        except OSError:
-            s.close()
-            return True
-
     def start(self):
         if self.running:
             return
 
-        if self._port_in_use():
-            print(f"[Coconut] Port {self._listen_port} already in use "
-                  f"(systemd proxy service?) — piggy-backing", flush=True)
+        try:
+            from proxy import (CoconutProxyHandler, ThreadedHTTPServer,
+                               ensure_certs, CERT_FILE, KEY_FILE,
+                               _make_legacy_ssl_context)
+            import proxy as proxy_mod
+
+            proxy_mod.TARGET_HOST = self._target_host
+            proxy_mod.TARGET_PORT = self._target_port
+            proxy_mod.LISTEN_PORT = self._listen_port
+
+            ensure_certs()
+
+            self._server = ThreadedHTTPServer(
+                ("0.0.0.0", self._listen_port), CoconutProxyHandler)
+
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ctx.load_cert_chain(CERT_FILE, KEY_FILE)
+            self._server.socket = ctx.wrap_socket(
+                self._server.socket, server_side=True)
+
+            self._thread = threading.Thread(
+                target=self._server.serve_forever, daemon=True)
+            self._thread.start()
+            self._external = False
             self.running = True
-            self._external = True
-            return
+            print(f"[Coconut] TLS Proxy started on {self.url}", flush=True)
 
-        from proxy import (CoconutProxyHandler, ThreadedHTTPServer,
-                           ensure_certs, CERT_FILE, KEY_FILE,
-                           _make_legacy_ssl_context)
-        import proxy as proxy_mod
-
-        proxy_mod.TARGET_HOST = self._target_host
-        proxy_mod.TARGET_PORT = self._target_port
-        proxy_mod.LISTEN_PORT = self._listen_port
-
-        ensure_certs()
-
-        self._server = ThreadedHTTPServer(
-            ("0.0.0.0", self._listen_port), CoconutProxyHandler)
-
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        ctx.load_cert_chain(CERT_FILE, KEY_FILE)
-        self._server.socket = ctx.wrap_socket(
-            self._server.socket, server_side=True)
-
-        self._thread = threading.Thread(
-            target=self._server.serve_forever, daemon=True)
-        self._thread.start()
-        self._external = False
-        self.running = True
-        print(f"[Coconut] TLS Proxy started on {self.url}", flush=True)
+        except OSError as e:
+            if "already in use" in str(e).lower():
+                print(f"[Coconut] Port {self._listen_port} already in use "
+                      f"(systemd service is running) — proxy ON externally",
+                      flush=True)
+                self._external = True
+                self.running = True
+            else:
+                raise
 
     def stop(self):
         if not self.running:
@@ -1738,14 +1731,24 @@ class BrowserWindow(QMainWindow):
             self.proxy_btn.setChecked(True)
             url = self._proxy.url
             self.proxy_btn.setText("  Proxy ON  ")
-            self.proxy_label.setText(f"  ●  Proxy ON — {url}")
+            if getattr(self._proxy, '_external', False):
+                self.proxy_label.setText(f"  ●  Proxy ON (service) — {url}")
+            else:
+                self.proxy_label.setText(f"  ●  Proxy ON — {url}")
             self.proxy_label.setStyleSheet(
                 "color: #4ade80; font-weight: bold; font-size: 12px; padding: 0 12px;")
         except Exception as e:
             print(f"[Coconut] Proxy auto-start failed: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
 
     def _toggle_proxy(self):
         if self._proxy.running:
+            if getattr(self._proxy, '_external', False):
+                self.status.showMessage(
+                    "Proxy is managed by systemd service — use "
+                    "'coconut-proxy stop' to control it", 5000)
+                return
             self._proxy.stop()
             self.proxy_btn.setChecked(False)
             self.proxy_btn.setText("  Proxy OFF  ")
@@ -1758,8 +1761,11 @@ class BrowserWindow(QMainWindow):
                 self._proxy.start()
                 self.proxy_btn.setChecked(True)
                 url = self._proxy.url
-                self.proxy_btn.setText(f"  Proxy ON  ")
-                self.proxy_label.setText(f"  ●  Proxy ON — {url}")
+                self.proxy_btn.setText("  Proxy ON  ")
+                if getattr(self._proxy, '_external', False):
+                    self.proxy_label.setText(f"  ●  Proxy ON (service) — {url}")
+                else:
+                    self.proxy_label.setText(f"  ●  Proxy ON — {url}")
                 self.proxy_label.setStyleSheet(
                     "color: #4ade80; font-weight: bold; font-size: 12px; padding: 0 12px;")
                 self.status.showMessage(
