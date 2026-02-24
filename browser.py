@@ -1705,6 +1705,93 @@ class BrowserWindow(QMainWindow):
         except Exception as e:
             print(f"[Coconut] Failed to launch Java: {e}", flush=True)
             QMessageBox.critical(self, "Launch Failed", str(e))
+            return
+
+        self._kvm_host = host
+        self._kvm_proc = proc
+
+        if sys.platform.startswith("linux") and shutil.which("xdotool"):
+            self._embed_attempts = 0
+            self._embed_timer = QTimer(self)
+            self._embed_timer.timeout.connect(self._try_embed_java_window)
+            self._embed_timer.start(500)
+        else:
+            print("[Coconut] Non-Linux or no xdotool — KVM in separate window", flush=True)
+
+    def _try_embed_java_window(self):
+        """Find the Java KVM window by PID and embed it inside the browser."""
+        self._embed_attempts += 1
+        if self._embed_attempts > 20:
+            self._embed_timer.stop()
+            print("[Coconut] Could not find Java window to embed after 10s", flush=True)
+            return
+
+        if self._kvm_proc.poll() is not None:
+            self._embed_timer.stop()
+            return
+
+        try:
+            r = subprocess.run(
+                ["xdotool", "search", "--pid", str(self._kvm_proc.pid),
+                 "--name", "CoconutKVM"],
+                capture_output=True, text=True, timeout=2)
+            wids = [w.strip() for w in r.stdout.strip().split('\n') if w.strip()]
+            if not wids:
+                return
+
+            xid = int(wids[0])
+            self._embed_timer.stop()
+            print(f"[Coconut] Found Java window XID={xid}, embedding…", flush=True)
+
+            from PyQt5.QtGui import QWindow
+            foreign = QWindow.fromWinId(xid)
+            container = QWidget.createWindowContainer(foreign, self)
+            container.setMinimumSize(640, 480)
+
+            self._kvm_container = container
+            self._kvm_foreign = foreign
+            self._kvm_xid = xid
+
+            self.tabs.hide()
+            container.setParent(self)
+            container.setGeometry(self.centralWidget().geometry())
+            container.show()
+            container.setFocus()
+
+            self._kvm_poll = QTimer(self)
+            self._kvm_poll.timeout.connect(self._check_kvm_proc)
+            self._kvm_poll.start(500)
+
+            self.status.showMessage("KVM connected — double Scroll Lock to return", 0)
+            print("[Coconut] Java window embedded successfully", flush=True)
+
+        except Exception as e:
+            print(f"[Coconut] Embed attempt {self._embed_attempts}: {e}", flush=True)
+
+    def _check_kvm_proc(self):
+        """Watch for Java process exit to restore the browser."""
+        if self._kvm_proc and self._kvm_proc.poll() is not None:
+            self._kvm_poll.stop()
+            self._restore_browser()
+
+    def _restore_browser(self):
+        """Remove embedded KVM and show browser tabs again."""
+        print("[Coconut] KVM viewer closed — restoring browser", flush=True)
+        if hasattr(self, '_kvm_container') and self._kvm_container:
+            self._kvm_container.hide()
+            self._kvm_container.setParent(None)
+            self._kvm_container.deleteLater()
+            self._kvm_container = None
+        self._kvm_foreign = None
+        self._kvm_proc = None
+
+        self.tabs.show()
+        self.status.clearMessage()
+
+        v = self._current_view()
+        if v:
+            host = getattr(self, "_kvm_host", os.environ.get("COCONUT_TARGET", "10.1.10.36"))
+            v.setUrl(QUrl(f"https://{host}/"))
 
     # ── Proxy ─────────────────────────────────────────────────────────
     def _auto_start_proxy(self):
@@ -1746,20 +1833,12 @@ class BrowserWindow(QMainWindow):
 
     def _on_kvm_disconnect(self):
         print("[Coconut] KVM viewer disconnected", flush=True)
-        if hasattr(self, '_kvm_widget') and self._kvm_widget:
-            self._kvm_widget.cleanup()
-            self._kvm_widget.hide()
-            self._kvm_widget.deleteLater()
-            self._kvm_widget = None
-        v = self._current_view()
-        if v:
-            host = getattr(self, "_kvm_host", "10.1.10.36")
-            v.setUrl(QUrl(f"https://{host}/"))
+        self._restore_browser()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if hasattr(self, '_kvm_widget') and self._kvm_widget:
-            self._kvm_widget.setGeometry(self.rect())
+        if hasattr(self, '_kvm_container') and self._kvm_container:
+            self._kvm_container.setGeometry(self.centralWidget().geometry())
 
     def _find_java(self):
         """Find a Java binary, preferring JDK 11 (has Applet API)."""

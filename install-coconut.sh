@@ -53,6 +53,7 @@ apt-get install -y -qq \
     python3-pyqt5.qtwebengine \
     openjdk-11-jdk \
     openssl \
+    xdotool \
     > /dev/null 2>&1
 
 info "Python 3:       $(python3 --version 2>&1)"
