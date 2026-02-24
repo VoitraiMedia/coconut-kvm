@@ -1143,23 +1143,28 @@ class ProxyManager:
         ip = _get_lan_ip()
         return f"https://{ip}:{self._listen_port}"
 
-    def _kill_stale_port(self):
-        """Kill any process holding our listen port."""
-        if sys.platform.startswith("linux"):
-            try:
-                r = subprocess.run(
-                    ["fuser", "-k", f"{self._listen_port}/tcp"],
-                    capture_output=True, timeout=5)
-                if r.returncode == 0:
-                    print(f"[Coconut] Killed stale process on port {self._listen_port}", flush=True)
-                    import time
-                    time.sleep(1)
-            except Exception:
-                pass
+    def _port_in_use(self):
+        """Check if our listen port is already bound by another process."""
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.bind(("0.0.0.0", self._listen_port))
+            s.close()
+            return False
+        except OSError:
+            s.close()
+            return True
 
     def start(self):
         if self.running:
             return
+
+        if self._port_in_use():
+            print(f"[Coconut] Port {self._listen_port} already in use "
+                  f"(systemd proxy service?) — piggy-backing", flush=True)
+            self.running = True
+            self._external = True
+            return
+
         from proxy import (CoconutProxyHandler, ThreadedHTTPServer,
                            ensure_certs, CERT_FILE, KEY_FILE,
                            _make_legacy_ssl_context)
@@ -1171,17 +1176,8 @@ class ProxyManager:
 
         ensure_certs()
 
-        try:
-            self._server = ThreadedHTTPServer(
-                ("0.0.0.0", self._listen_port), CoconutProxyHandler)
-        except OSError as e:
-            if "Address already in use" in str(e):
-                print(f"[Coconut] Port {self._listen_port} in use, killing stale process…", flush=True)
-                self._kill_stale_port()
-                self._server = ThreadedHTTPServer(
-                    ("0.0.0.0", self._listen_port), CoconutProxyHandler)
-            else:
-                raise
+        self._server = ThreadedHTTPServer(
+            ("0.0.0.0", self._listen_port), CoconutProxyHandler)
 
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(CERT_FILE, KEY_FILE)
@@ -1191,11 +1187,17 @@ class ProxyManager:
         self._thread = threading.Thread(
             target=self._server.serve_forever, daemon=True)
         self._thread.start()
+        self._external = False
         self.running = True
         print(f"[Coconut] TLS Proxy started on {self.url}", flush=True)
 
     def stop(self):
         if not self.running:
+            return
+        if getattr(self, '_external', False):
+            print("[Coconut] Proxy is managed by systemd — not stopping", flush=True)
+            self.running = False
+            self._external = False
             return
         try:
             self._server.shutdown()
