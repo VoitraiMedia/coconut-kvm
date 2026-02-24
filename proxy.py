@@ -225,13 +225,25 @@ JAVA_EMULATION_JS = r"""
             params._connect_pname = pname;
             params._connect_ptype = ptype;
             params._connect_host = '""" + TARGET_HOST + r"""';
-            // Call the proxy's launch endpoint
             fetch('/__coconut_launch__', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(params)
             }).then(function(r){return r.json();}).then(function(d){
                 console.log('[Coconut] Launch response: ' + JSON.stringify(d));
+                if (d.status === 'remote') {
+                    var qs = 'pname=' + encodeURIComponent(pname)
+                           + '&portId=' + encodeURIComponent(portId)
+                           + '&pindex=' + encodeURIComponent(pindex)
+                           + '&ptype=' + encodeURIComponent(ptype)
+                           + '&SESSION_ID=' + encodeURIComponent(params.SESSION_ID || '')
+                           + '&SSLPORT=' + encodeURIComponent(params.SSLPORT || '443')
+                           + '&BOARD_NAME=' + encodeURIComponent(params.BOARD_NAME || '')
+                           + '&BOARD_TYPE=' + encodeURIComponent(params.BOARD_TYPE || '')
+                           + '&PRODUCT_TYPE=' + encodeURIComponent(params.PRODUCT_TYPE || '')
+                           + '&HW_ID=' + encodeURIComponent(params.HW_ID || '');
+                    window.location.href = '/__coconut_launcher__?' + qs;
+                }
             }).catch(function(e){
                 console.log('[Coconut] Launch error: ' + e);
             });
@@ -458,6 +470,10 @@ class CoconutProxyHandler(http.server.BaseHTTPRequestHandler):
         host_hdr = self.headers.get("Host", f"localhost:{LISTEN_PORT}")
         return f"https://{host_hdr}"
 
+    def _is_local_client(self):
+        addr = self.client_address[0]
+        return addr in ("127.0.0.1", "::1", "localhost")
+
     def _proxy_request(self, method):
         # Handle the launch API endpoint
         if self.path == "/__coconut_launch__":
@@ -465,12 +481,31 @@ class CoconutProxyHandler(http.server.BaseHTTPRequestHandler):
             body = self.rfile.read(content_len) if content_len else b""
             try:
                 params = json.loads(body) if body else {}
-                result = launch_kvm_viewer(params)
-                self._send_json(200, result)
+                if self._is_local_client():
+                    result = launch_kvm_viewer(params)
+                    self._send_json(200, result)
+                else:
+                    self._send_json(200, {
+                        "status": "remote",
+                        "message": "Download the launcher script to connect from this computer"
+                    })
             except Exception as e:
                 import traceback
                 traceback.print_exc()
                 self._send_json(500, {"error": str(e)})
+            return
+
+        # Serve launcher script for remote clients
+        if self.path.startswith("/__coconut_launcher__"):
+            self._serve_launcher_script()
+            return
+
+        # Serve supporting files
+        if self.path == "/__coconut_file__/CoconutAppletLauncher.java":
+            self._serve_local_file("CoconutAppletLauncher.java", "text/plain")
+            return
+        if self.path == "/__coconut_file__/coconut.java.security":
+            self._serve_local_file("coconut.java.security", "text/plain")
             return
 
         # Block Java download domains
@@ -576,6 +611,141 @@ class CoconutProxyHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_local_file(self, filename, content_type):
+        filepath = os.path.join(os.path.dirname(__file__), filename)
+        if not os.path.isfile(filepath):
+            self._send_json(404, {"error": f"{filename} not found"})
+            return
+        with open(filepath, "rb") as f:
+            data = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _serve_launcher_script(self):
+        params = {}
+        if "?" in self.path:
+            from urllib.parse import parse_qs, urlparse
+            qs = parse_qs(urlparse(self.path).query)
+            for k, v in qs.items():
+                params[k] = v[0]
+
+        proxy_host = self.headers.get("Host", f"localhost:{LISTEN_PORT}")
+        proxy_url = f"https://{proxy_host}"
+        host = TARGET_HOST
+        port_name = params.get("pname", "KVM")
+        port_id = params.get("portId", "")
+        port_index = params.get("pindex", "0")
+        port_type = params.get("ptype", "Dual-VM")
+        session_id = params.get("SESSION_ID", "")
+        ssl_port = params.get("SSLPORT", "443")
+        board_name = params.get("BOARD_NAME", "Dominion KX2")
+        board_type = params.get("BOARD_TYPE", "lara")
+        product_type = params.get("PRODUCT_TYPE", "kx28")
+        hw_id = params.get("HW_ID", "C2")
+
+        script = f'''#!/bin/bash
+# Coconut KVM Launcher — connect to {port_name} on {host}
+# Generated by Coconut Proxy at {proxy_url}
+set -e
+
+COCONUT_DIR="$HOME/.coconut-kvm"
+mkdir -p "$COCONUT_DIR"
+cd "$COCONUT_DIR"
+
+echo "=== Coconut KVM Launcher ==="
+echo "Connecting to: {port_name} on {host}"
+echo ""
+
+# Check for Java
+JAVA=""
+for j in /usr/lib/jvm/java-11-openjdk-amd64/bin/java \\
+         /usr/lib/jvm/java-11-openjdk/bin/java \\
+         /opt/homebrew/opt/openjdk@11/bin/java \\
+         /usr/local/opt/openjdk@11/bin/java; do
+    if [ -x "$j" ]; then JAVA="$j"; break; fi
+done
+if [ -z "$JAVA" ]; then JAVA=$(which java 2>/dev/null || true); fi
+if [ -z "$JAVA" ]; then
+    echo "ERROR: Java not found. Install Java 11:"
+    echo "  Ubuntu/Debian: sudo apt install openjdk-11-jdk"
+    echo "  macOS:         brew install openjdk@11"
+    exit 1
+fi
+echo "Using Java: $JAVA"
+JAVAC=$(echo "$JAVA" | sed 's|/bin/java|/bin/javac|')
+
+# Download supporting files from proxy
+echo "Downloading launcher files..."
+curl -sk "{proxy_url}/__coconut_file__/CoconutAppletLauncher.java" -o CoconutAppletLauncher.java
+curl -sk "{proxy_url}/__coconut_file__/coconut.java.security" -o coconut.java.security
+
+# Download JARs from the Raritan device (via proxy)
+for jar in rc.jar rclang_en.jar; do
+    if [ ! -f "$jar" ]; then
+        echo "Downloading $jar..."
+        curl -sk "{proxy_url}/$jar" -o "$jar" || true
+    fi
+done
+
+# Compile launcher
+if [ ! -f CoconutAppletLauncher.class ] || \\
+   [ CoconutAppletLauncher.java -nt CoconutAppletLauncher.class ]; then
+    echo "Compiling launcher..."
+    "$JAVAC" -source 11 -target 11 CoconutAppletLauncher.java
+fi
+
+# Create security override
+cat > coconut.java.security.local << 'SECEOF'
+jdk.tls.disabledAlgorithms=SSLv3, RC4, DES, \\
+    DES40_CBC, RC4_40, 3DES_EDE_CBC, anon, NULL, \\
+    DH keySize < 768, EC keySize < 224
+jdk.certpath.disabledAlgorithms=
+SECEOF
+
+echo "Launching KVM viewer..."
+CP=".:rc.jar:rclang_en.jar"
+"$JAVA" \\
+    -Xms256m -Xmx512m \\
+    -Djava.awt.headless=false \\
+    -Djava.net.preferIPv4Stack=true \\
+    "-Djava.security.properties=coconut.java.security" \\
+    -Djdk.tls.client.protocols=TLSv1,TLSv1.1,TLSv1.2 \\
+    -Dhttps.protocols=TLSv1,TLSv1.1,TLSv1.2 \\
+    -Dcom.sun.net.ssl.checkRevocation=false \\
+    -cp "$CP" \\
+    CoconutAppletLauncher \\
+    nn.pp.rc.RemoteConsoleApplet \\
+    "https://{host}/" \\
+    BOARD_NAME="{board_name}" \\
+    BOARD_TYPE="{board_type}" \\
+    PRODUCT_TYPE="{product_type}" \\
+    HW_ID="{hw_id}" \\
+    SESSION_ID="{session_id}" \\
+    PORT=443 \\
+    SSLPORT={ssl_port} \\
+    SSL=force \\
+    FIPS=0 \\
+    PORT_ID="{port_id}" \\
+    LANGUAGE=en \\
+    InFrame=no \\
+    CONNECT_PORT_NAME="{port_name}" \\
+    CONNECT_INDEX={port_index} \\
+    CONNECT_PORT_ID="{port_id}" \\
+    CONNECT_PORT_TYPE="{port_type}"
+'''
+        body = script.encode("utf-8")
+        fname = f"coconut-kvm-{port_name.replace(' ', '_')}.sh"
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-sh")
+        self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
