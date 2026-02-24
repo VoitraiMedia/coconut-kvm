@@ -1713,9 +1713,6 @@ class BrowserWindow(QMainWindow):
         for k, v in applet_params.items():
             cmd.append(f"{k}={v}")
 
-        self._kvm_host = host
-        self._kvm_port_name = port_name
-
         print(f"[Coconut] Command: {' '.join(cmd[:8])}…", flush=True)
         self.status.showMessage(f"Launching KVM viewer for {port_name}…", 5000)
 
@@ -1731,38 +1728,6 @@ class BrowserWindow(QMainWindow):
         except Exception as e:
             print(f"[Coconut] Failed to launch Java: {e}", flush=True)
             QMessageBox.critical(self, "Launch Failed", str(e))
-            return
-
-        self._kvm_proc = proc
-        self.hide()
-
-        self._kvm_poll = QTimer(self)
-        self._kvm_poll.timeout.connect(self._check_kvm_proc)
-        self._kvm_poll.start(500)
-
-    def _check_kvm_proc(self):
-        """Watch for Java process exit to restore the browser."""
-        if self._kvm_proc and self._kvm_proc.poll() is not None:
-            self._kvm_poll.stop()
-            self._restore_browser()
-
-    def _restore_browser(self):
-        """Show the browser again after KVM exits."""
-        print("[Coconut] KVM closed — restoring browser", flush=True)
-
-        if hasattr(self, '_kvm_poll') and self._kvm_poll:
-            self._kvm_poll.stop()
-
-        self._kvm_proc = None
-        self.show()
-        self.raise_()
-        self.activateWindow()
-        self.status.clearMessage()
-
-        v = self._current_view()
-        if v:
-            host = getattr(self, "_kvm_host", os.environ.get("COCONUT_TARGET", "10.1.10.36"))
-            v.setUrl(QUrl(f"https://{host}/"))
 
     # ── Proxy ─────────────────────────────────────────────────────────
     def _auto_start_proxy(self):
@@ -1801,13 +1766,6 @@ class BrowserWindow(QMainWindow):
                 self.proxy_btn.setChecked(False)
                 QMessageBox.warning(self, "Proxy Error",
                                     f"Failed to start proxy:\n{e}")
-
-    def _on_kvm_disconnect(self):
-        print("[Coconut] KVM viewer disconnected", flush=True)
-        self._restore_browser()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
 
     def _find_java(self):
         """Find a Java binary, preferring JDK 11 (has Applet API)."""
