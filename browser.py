@@ -1186,7 +1186,7 @@ class ProxyManager:
 
 # ── Main window ─────────────────────────────────────────────────────────────
 class BrowserWindow(QMainWindow):
-    HOME_URL = "https://10.1.10.36"
+    HOME_URL = f"https://{os.environ.get('COCONUT_TARGET', '10.1.10.36')}"
 
     def __init__(self):
         super().__init__()
