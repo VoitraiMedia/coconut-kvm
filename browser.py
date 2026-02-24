@@ -1759,11 +1759,7 @@ class BrowserWindow(QMainWindow):
             panel_layout.addWidget(container, 1)
 
             self.tabs.hide()
-            kvm_panel.setParent(self)
-            kvm_panel.setGeometry(self.centralWidget().geometry())
-            kvm_panel.show()
-            kvm_panel.raise_()
-            container.show()
+            self.setCentralWidget(kvm_panel)
             QApplication.processEvents()
 
             self._kvm_panel = kvm_panel
@@ -1774,6 +1770,10 @@ class BrowserWindow(QMainWindow):
         print(f"[Coconut] Command: {' '.join(cmd[:8])}…", flush=True)
         self.status.showMessage(f"Launching KVM viewer for {port_name}…", 5000)
 
+        env = os.environ.copy()
+        if can_embed:
+            env["_JAVA_AWT_WM_NONREPARENTING"] = "1"
+
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -1781,6 +1781,7 @@ class BrowserWindow(QMainWindow):
                 stdout=None,
                 stderr=None,
                 cwd=jar_dir,
+                env=env,
             )
             print(f"[Coconut] KVM viewer launched (PID {proc.pid})", flush=True)
         except Exception as e:
@@ -1853,9 +1854,13 @@ class BrowserWindow(QMainWindow):
         print(f"[Coconut] Found Java XID={xid}, reparenting into WID={parent_wid}…", flush=True)
 
         try:
+            self._xdotool("windowminimize", str(xid))
+            import time; time.sleep(0.1)
+
             self._xdotool("windowreparent", str(xid), str(parent_wid))
-            self._xdotool("windowmove", "--relative", str(xid), "0", "0")
+
             w, h = container.width(), container.height()
+            self._xdotool("windowmove", "--relative", str(xid), "0", "0")
             self._xdotool("windowsize", str(xid), str(w), str(h))
             self._xdotool("windowactivate", str(xid))
             self._xdotool("windowfocus", str(xid))
@@ -1910,7 +1915,6 @@ class BrowserWindow(QMainWindow):
 
         if hasattr(self, '_kvm_panel') and self._kvm_panel:
             self._kvm_panel.hide()
-            self._kvm_panel.setParent(None)
             self._kvm_panel.deleteLater()
             self._kvm_panel = None
 
@@ -1924,6 +1928,7 @@ class BrowserWindow(QMainWindow):
                 pass
         self._kvm_proc = None
 
+        self.setCentralWidget(self.tabs)
         self.tabs.show()
         self.status.clearMessage()
 
@@ -1976,8 +1981,7 @@ class BrowserWindow(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if hasattr(self, '_kvm_panel') and self._kvm_panel:
-            self._kvm_panel.setGeometry(self.centralWidget().geometry())
+        if hasattr(self, '_kvm_xid') and self._kvm_xid:
             QTimer.singleShot(50, self._resize_embedded_kvm)
 
     def _find_java(self):

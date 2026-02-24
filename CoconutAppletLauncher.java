@@ -51,14 +51,11 @@ public class CoconutAppletLauncher extends JFrame implements AppletStub, AppletC
         });
 
         if (embed) {
-            // Embed mode: small window, no decorations, no maximize.
-            // Python will reparent this into its own widget.
             setUndecorated(true);
             setResizable(true);
             setSize(captureW, captureH);
+            setLocation(-10000, -10000);
             applet.setPreferredSize(new Dimension(captureW, captureH));
-
-            // Remove the applet's own menu bar to save vertical space
             setJMenuBar(null);
         } else {
             // Standalone mode: fullscreen, undecorated
