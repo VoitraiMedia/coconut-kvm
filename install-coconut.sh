@@ -148,6 +148,15 @@ shutil.copy2(src, dst)
 }
 info "Installed CoconutAppletLauncher.java"
 
+# ── Copy icon ────────────────────────────────────────────────────────────────
+ICON_SRC="$(cd "$(dirname "$0")" && pwd)/coconut-icon.png"
+if [[ -f "$ICON_SRC" ]]; then
+    cp "$ICON_SRC" "$INSTALL_DIR/coconut-icon.png"
+    info "Installed coconut-icon.png"
+else
+    warn "coconut-icon.png not found alongside installer"
+fi
+
 # ── Compile Java launcher ────────────────────────────────────────────────────
 step "Compiling Java applet launcher"
 
