@@ -21,42 +21,52 @@ public class CoconutAppletLauncher extends JFrame implements AppletStub, AppletC
     private final URL documentBase;
     private volatile boolean active = true;
     private final boolean bridgeMode;
+    private final boolean embedMode;
 
     private int captureW = 1024, captureH = 768;
 
     public CoconutAppletLauncher(String className, URL codeBase,
-                                  Map<String, String> params, boolean bridge) throws Exception {
+                                  Map<String, String> params,
+                                  boolean bridge, boolean embed) throws Exception {
         this.params = params;
         this.codeBase = codeBase;
         this.documentBase = codeBase;
         this.bridgeMode = bridge;
-
-        // stdout/stderr go to parent process
+        this.embedMode = embed;
 
         log("Loading applet class: " + className);
         log("Codebase: " + codeBase);
+        log("Mode: " + (embed ? "embed" : bridge ? "bridge" : "standalone"));
         for (Map.Entry<String, String> e : params.entrySet())
             log("  " + e.getKey() + " = " + e.getValue());
 
         Class<?> cls = Class.forName(className);
         applet = (Applet) cls.getDeclaredConstructor().newInstance();
         applet.setStub(this);
-        applet.setPreferredSize(new Dimension(captureW, captureH));
-
-        String portName = params.getOrDefault("CONNECT_PORT_NAME",
-                params.getOrDefault("BOARD_NAME", "Remote Console"));
 
         setTitle("CoconutKVM");
-        setUndecorated(true);
-        setExtendedState(JFrame.MAXIMIZED_BOTH);
-        if (!bridge) {
-            installScrollLockListener();
-        }
-
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
             @Override public void windowClosing(WindowEvent e) { shutdown(); }
         });
+
+        if (embed) {
+            // Embed mode: small window, no decorations, no maximize.
+            // Python will reparent this into its own widget.
+            setUndecorated(true);
+            setResizable(true);
+            setSize(captureW, captureH);
+            applet.setPreferredSize(new Dimension(captureW, captureH));
+
+            // Remove the applet's own menu bar to save vertical space
+            setJMenuBar(null);
+        } else {
+            // Standalone mode: fullscreen, undecorated
+            setUndecorated(true);
+            setExtendedState(JFrame.MAXIMIZED_BOTH);
+            applet.setPreferredSize(new Dimension(captureW, captureH));
+            installScrollLockListener();
+        }
 
         setLayout(new BorderLayout());
         add(applet, BorderLayout.CENTER);
@@ -69,10 +79,41 @@ public class CoconutAppletLauncher extends JFrame implements AppletStub, AppletC
         log("Applet started, showing=" + applet.isShowing()
                 + " size=" + applet.getWidth() + "x" + applet.getHeight());
 
-        // Event bridge disabled for testing — VNC render check
-        // if (bridge) { startBridge(); }
+        // Try to hide the applet's internal toolbar/menubar for cleaner embed
+        if (embed) {
+            hideAppletToolbars();
+        }
 
         scheduleConnect();
+    }
+
+    private void hideAppletToolbars() {
+        SwingUtilities.invokeLater(() -> {
+            try {
+                // Remove any JMenuBar the applet might have added to us
+                if (getJMenuBar() != null) {
+                    setJMenuBar(null);
+                }
+                // Look for toolbar-like components inside the applet
+                hideToolbarsRecursive(applet);
+                revalidate();
+                repaint();
+            } catch (Exception e) {
+                log("Toolbar hide: " + e.getMessage());
+            }
+        });
+    }
+
+    private void hideToolbarsRecursive(Container c) {
+        for (Component comp : c.getComponents()) {
+            if (comp instanceof JToolBar || comp instanceof JMenuBar) {
+                comp.setVisible(false);
+                log("Hidden toolbar: " + comp.getClass().getName());
+            }
+            if (comp instanceof Container) {
+                hideToolbarsRecursive((Container) comp);
+            }
+        }
     }
 
     // ── Bridge: events via stdin ──────────────────────────────────────
@@ -299,7 +340,7 @@ public class CoconutAppletLauncher extends JFrame implements AppletStub, AppletC
 
     public static void main(String[] args) {
         if (args.length < 2) {
-            System.err.println("Usage: CoconutAppletLauncher <class> <codebase> [--bridge] [k=v ...]");
+            System.err.println("Usage: CoconutAppletLauncher <class> <codebase> [--bridge|--embed] [k=v ...]");
             System.exit(1);
         }
 
@@ -309,18 +350,21 @@ public class CoconutAppletLauncher extends JFrame implements AppletStub, AppletC
         String className = args[0];
         String codebaseStr = args[1];
         boolean bridge = false;
+        boolean embed = false;
         Map<String, String> params = new LinkedHashMap<>();
 
         for (int i = 2; i < args.length; i++) {
             if ("--bridge".equals(args[i])) { bridge = true; continue; }
+            if ("--embed".equals(args[i])) { embed = true; continue; }
             int eq = args[i].indexOf('=');
             if (eq > 0) params.put(args[i].substring(0, eq), args[i].substring(eq + 1));
         }
 
         final boolean fBridge = bridge;
+        final boolean fEmbed = embed;
         SwingUtilities.invokeLater(() -> {
             try {
-                new CoconutAppletLauncher(className, new URL(codebaseStr), params, fBridge);
+                new CoconutAppletLauncher(className, new URL(codebaseStr), params, fBridge, fEmbed);
             } catch (Exception e) {
                 log("Fatal: " + e.getMessage());
                 e.printStackTrace();

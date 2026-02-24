@@ -1713,6 +1713,64 @@ class BrowserWindow(QMainWindow):
         for k, v in applet_params.items():
             cmd.append(f"{k}={v}")
 
+        self._kvm_host = host
+        self._kvm_port_name = port_name
+
+        is_linux = sys.platform.startswith("linux")
+        can_embed = is_linux and shutil.which("xdotool")
+
+        if can_embed:
+            cmd.append("--embed")
+
+            # Build the KVM panel BEFORE launching Java
+            kvm_panel = QWidget(self)
+            panel_layout = QVBoxLayout(kvm_panel)
+            panel_layout.setContentsMargins(0, 0, 0, 0)
+            panel_layout.setSpacing(0)
+
+            bar = QWidget()
+            bar.setFixedHeight(36)
+            bar.setStyleSheet(f"background: {DARK_SURFACE}; border-bottom: 1px solid {DARK_BORDER};")
+            bar_layout = QHBoxLayout(bar)
+            bar_layout.setContentsMargins(8, 2, 8, 2)
+
+            back_btn = QPushButton("◀  Back to Port Access")
+            back_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {DARK_BG}; color: {TEXT_PRIMARY};
+                    border: 1px solid {DARK_BORDER}; border-radius: 4px;
+                    padding: 4px 16px; font-size: 13px;
+                }}
+                QPushButton:hover {{ background: {ACCENT}; border-color: {ACCENT}; }}
+            """)
+            back_btn.clicked.connect(self._kvm_back)
+            bar_layout.addWidget(back_btn)
+
+            port_label = QLabel(f"  KVM: {port_name}")
+            port_label.setStyleSheet("color: #4ade80; font-weight: bold; font-size: 13px;")
+            bar_layout.addWidget(port_label)
+            bar_layout.addStretch()
+
+            container = QWidget()
+            container.setAttribute(Qt.WA_NativeWindow, True)
+            container.setMinimumSize(640, 480)
+
+            panel_layout.addWidget(bar)
+            panel_layout.addWidget(container, 1)
+
+            self.tabs.hide()
+            kvm_panel.setParent(self)
+            kvm_panel.setGeometry(self.centralWidget().geometry())
+            kvm_panel.show()
+            kvm_panel.raise_()
+            container.show()
+            QApplication.processEvents()
+
+            self._kvm_panel = kvm_panel
+            self._kvm_container = container
+            self._kvm_parent_wid = int(container.winId())
+            print(f"[Coconut] Container ready, WID={self._kvm_parent_wid}", flush=True)
+
         print(f"[Coconut] Command: {' '.join(cmd[:8])}…", flush=True)
         self.status.showMessage(f"Launching KVM viewer for {port_name}…", 5000)
 
@@ -1728,19 +1786,19 @@ class BrowserWindow(QMainWindow):
         except Exception as e:
             print(f"[Coconut] Failed to launch Java: {e}", flush=True)
             QMessageBox.critical(self, "Launch Failed", str(e))
+            if can_embed:
+                self._restore_browser()
             return
 
-        self._kvm_host = host
         self._kvm_proc = proc
-        self._kvm_port_name = port_name
 
-        if sys.platform.startswith("linux"):
+        if can_embed:
             self._embed_attempts = 0
             self._embed_timer = QTimer(self)
             self._embed_timer.timeout.connect(self._try_embed_java_window)
-            self._embed_timer.start(500)
+            self._embed_timer.start(300)
         else:
-            print("[Coconut] Non-Linux — KVM in separate window", flush=True)
+            print("[Coconut] No xdotool — KVM in separate window", flush=True)
 
     # ── X11 KVM embedding (xdotool windowreparent) ──────────────────
 
@@ -1771,14 +1829,15 @@ class BrowserWindow(QMainWindow):
         return None
 
     def _try_embed_java_window(self):
-        """Find the Java window and reparent it into our Qt widget using X11."""
+        """Find the Java window and reparent it into our pre-built container."""
         self._embed_attempts += 1
-        if self._embed_attempts > 30:
+        if self._embed_attempts > 40:
             self._embed_timer.stop()
-            print("[Coconut] Could not find Java window after 15s", flush=True)
+            print("[Coconut] Could not find Java window after 12s", flush=True)
             return
         if self._kvm_proc.poll() is not None:
             self._embed_timer.stop()
+            self._restore_browser()
             return
 
         xid = self._find_java_xid()
@@ -1789,88 +1848,27 @@ class BrowserWindow(QMainWindow):
 
         self._embed_timer.stop()
         self._kvm_xid = xid
-        print(f"[Coconut] Found Java window XID={xid}, reparenting via X11…", flush=True)
+        parent_wid = self._kvm_parent_wid
+        container = self._kvm_container
+        print(f"[Coconut] Found Java XID={xid}, reparenting into WID={parent_wid}…", flush=True)
 
         try:
-            # Build the KVM panel: back button bar + container for Java window
-            kvm_panel = QWidget(self)
-            panel_layout = QVBoxLayout(kvm_panel)
-            panel_layout.setContentsMargins(0, 0, 0, 0)
-            panel_layout.setSpacing(0)
-
-            # Back button bar
-            bar = QWidget()
-            bar.setFixedHeight(36)
-            bar.setStyleSheet(f"background: {DARK_SURFACE}; border-bottom: 1px solid {DARK_BORDER};")
-            bar_layout = QHBoxLayout(bar)
-            bar_layout.setContentsMargins(8, 2, 8, 2)
-
-            back_btn = QPushButton("◀  Back to Port Access")
-            back_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: {DARK_BG};
-                    color: {TEXT_PRIMARY};
-                    border: 1px solid {DARK_BORDER};
-                    border-radius: 4px;
-                    padding: 4px 16px;
-                    font-size: 13px;
-                }}
-                QPushButton:hover {{
-                    background: {ACCENT};
-                    border-color: {ACCENT};
-                }}
-            """)
-            back_btn.clicked.connect(self._kvm_back)
-            bar_layout.addWidget(back_btn)
-
-            port_label = QLabel(f"  KVM: {getattr(self, '_kvm_port_name', 'Remote Console')}")
-            port_label.setStyleSheet("color: #4ade80; font-weight: bold; font-size: 13px;")
-            bar_layout.addWidget(port_label)
-            bar_layout.addStretch()
-
-            # Native container widget — this gets an X11 window we can reparent into
-            container = QWidget()
-            container.setAttribute(Qt.WA_NativeWindow, True)
-            container.setMinimumSize(640, 480)
-
-            panel_layout.addWidget(bar)
-            panel_layout.addWidget(container, 1)
-
-            self._kvm_panel = kvm_panel
-            self._kvm_container = container
-
-            # Swap out tabs for the KVM panel
-            self.tabs.hide()
-            kvm_panel.setParent(self)
-            kvm_panel.setGeometry(self.centralWidget().geometry())
-            kvm_panel.show()
-            kvm_panel.raise_()
-
-            # Force the container to create its native X11 window
-            container.show()
-            QApplication.processEvents()
-
-            parent_wid = int(container.winId())
-            print(f"[Coconut] Container WID={parent_wid}, reparenting Java XID={xid}…", flush=True)
-
-            # X11 reparent: move the Java window into our container
             self._xdotool("windowreparent", str(xid), str(parent_wid))
             self._xdotool("windowmove", "--relative", str(xid), "0", "0")
-            self._xdotool("windowsize", str(xid),
-                          str(container.width()), str(container.height()))
+            w, h = container.width(), container.height()
+            self._xdotool("windowsize", str(xid), str(w), str(h))
             self._xdotool("windowactivate", str(xid))
             self._xdotool("windowfocus", str(xid))
 
-            # Poll for Java process exit + resize tracking
             self._kvm_poll = QTimer(self)
             self._kvm_poll.timeout.connect(self._check_kvm_proc)
             self._kvm_poll.start(500)
 
             self.status.showMessage("KVM connected", 0)
-            print("[Coconut] Java window embedded via X11 reparent", flush=True)
+            print(f"[Coconut] Embedded OK — Java window {w}x{h}", flush=True)
 
         except Exception as e:
-            print(f"[Coconut] Embed failed: {e}", flush=True)
+            print(f"[Coconut] Reparent failed: {e}", flush=True)
             import traceback
             traceback.print_exc()
 

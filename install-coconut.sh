@@ -158,6 +158,7 @@ if [[ ! -x "$JAVAC" ]]; then
 fi
 
 if [[ -n "$JAVAC" && -f "$INSTALL_DIR/CoconutAppletLauncher.java" ]]; then
+    rm -f /var/lib/coconut/jars/CoconutAppletLauncher.class
     "$JAVAC" -source 11 -target 11 \
         -d /var/lib/coconut/jars \
         "$INSTALL_DIR/CoconutAppletLauncher.java" 2>/dev/null
