@@ -215,6 +215,7 @@ EnvironmentFile=/etc/coconut.env
 Environment=HOME=/var/lib/coconut
 Environment=PYTHONUNBUFFERED=1
 WorkingDirectory=$INSTALL_DIR
+ExecStartPre=/bin/bash -c 'fuser -k ${COCONUT_PORT:-8443}/tcp 2>/dev/null || true; sleep 1'
 ExecStart=/usr/bin/python3 $INSTALL_DIR/proxy.py
 Restart=always
 RestartSec=5

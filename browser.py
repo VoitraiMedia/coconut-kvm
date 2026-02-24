@@ -1143,6 +1143,20 @@ class ProxyManager:
         ip = _get_lan_ip()
         return f"https://{ip}:{self._listen_port}"
 
+    def _kill_stale_port(self):
+        """Kill any process holding our listen port."""
+        if sys.platform.startswith("linux"):
+            try:
+                r = subprocess.run(
+                    ["fuser", "-k", f"{self._listen_port}/tcp"],
+                    capture_output=True, timeout=5)
+                if r.returncode == 0:
+                    print(f"[Coconut] Killed stale process on port {self._listen_port}", flush=True)
+                    import time
+                    time.sleep(1)
+            except Exception:
+                pass
+
     def start(self):
         if self.running:
             return
@@ -1157,8 +1171,17 @@ class ProxyManager:
 
         ensure_certs()
 
-        self._server = ThreadedHTTPServer(
-            ("0.0.0.0", self._listen_port), CoconutProxyHandler)
+        try:
+            self._server = ThreadedHTTPServer(
+                ("0.0.0.0", self._listen_port), CoconutProxyHandler)
+        except OSError as e:
+            if "Address already in use" in str(e):
+                print(f"[Coconut] Port {self._listen_port} in use, killing stale process…", flush=True)
+                self._kill_stale_port()
+                self._server = ThreadedHTTPServer(
+                    ("0.0.0.0", self._listen_port), CoconutProxyHandler)
+            else:
+                raise
 
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(CERT_FILE, KEY_FILE)
