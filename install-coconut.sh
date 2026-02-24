@@ -49,13 +49,17 @@ apt-get install -y -qq \
     python3 \
     python3-venv \
     python3-pip \
+    python3-pyqt5 \
+    python3-pyqt5.qtwebengine \
     openjdk-11-jdk \
     openssl \
     > /dev/null 2>&1
 
-info "Python 3: $(python3 --version 2>&1)"
-info "Java 11:  $(java -version 2>&1 | head -1)"
-info "OpenSSL:  $(openssl version 2>&1)"
+info "Python 3:       $(python3 --version 2>&1)"
+info "Java 11:        $(java -version 2>&1 | head -1)"
+info "OpenSSL:        $(openssl version 2>&1)"
+info "PyQt5:          $(python3 -c 'from PyQt5.QtCore import PYQT_VERSION_STR; print(PYQT_VERSION_STR)' 2>/dev/null || echo 'not found')"
+info "QtWebEngine:    $(python3 -c 'from PyQt5.QtWebEngineWidgets import QWebEngineView; print("OK")' 2>/dev/null || echo 'not found')"
 
 # ── Create service user ──────────────────────────────────────────────────────
 step "Creating service user"
@@ -289,17 +293,8 @@ chmod +x /usr/local/bin/coconut-proxy
 cat > /usr/local/bin/coconut-browser << 'BIN2_EOF'
 #!/bin/bash
 # Launch the Coconut GUI browser (requires desktop/X11)
-export COCONUT_TARGET="${COCONUT_TARGET:-10.1.10.36}"
-export COCONUT_PORT="${COCONUT_PORT:-8443}"
-export OPENSSL_CONF="/opt/coconut/coconut.openssl.cnf"
-
-if ! python3 -c "from PyQt5.QtWidgets import QApplication" 2>/dev/null; then
-    echo "Installing PyQt5 for GUI..."
-    pip3 install --user PyQt5 PyQtWebEngine 2>/dev/null || {
-        sudo apt-get install -y python3-pyqt5 python3-pyqt5.qtwebengine 2>/dev/null
-    }
-fi
-
+source /etc/coconut.env 2>/dev/null
+export COCONUT_TARGET COCONUT_PORT OPENSSL_CONF
 exec python3 /opt/coconut/browser.py "$@"
 BIN2_EOF
 chmod +x /usr/local/bin/coconut-browser
