@@ -264,11 +264,50 @@ public class CoconutAppletLauncher extends JFrame implements AppletStub, AppletC
                     log("Calling connect()...");
                     m.invoke(applet, args);
                     log("connect() OK");
+                    hideFrameAfterConnect();
                 } catch (Exception e) {
                     log("connect() failed: " + e.getMessage());
                 }
             });
         }, "AutoConnect").start();
+    }
+
+    private void hideFrameAfterConnect() {
+        new Thread(() -> {
+            try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
+            SwingUtilities.invokeLater(() -> {
+                Window[] windows = Window.getWindows();
+                for (Window w : windows) {
+                    if (w != this && w.isVisible() && w.getWidth() > 200) {
+                        log("Applet opened its own window — hiding launcher frame");
+                        setVisible(false);
+                        monitorAppletWindows();
+                        return;
+                    }
+                }
+                log("No separate applet window found — keeping launcher frame");
+            });
+        }, "HideFrame").start();
+    }
+
+    private void monitorAppletWindows() {
+        new Thread(() -> {
+            while (active) {
+                try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+                boolean anyVisible = false;
+                for (Window w : Window.getWindows()) {
+                    if (w != this && w.isVisible()) {
+                        anyVisible = true;
+                        break;
+                    }
+                }
+                if (!anyVisible) {
+                    log("All applet windows closed — shutting down");
+                    SwingUtilities.invokeLater(this::shutdown);
+                    return;
+                }
+            }
+        }, "WindowMonitor").start();
     }
 
     private Method findMethod(String name) {
