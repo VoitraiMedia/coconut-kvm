@@ -339,7 +339,7 @@ cat > /usr/share/applications/coconut-browser.desktop << 'DESKTOP_EOF'
 Name=Coconut
 Comment=KVM Browser for Raritan Equipment
 Exec=/usr/local/bin/coconut-browser
-Icon=coconut
+Icon=/usr/share/pixmaps/coconut.png
 Type=Application
 Categories=Network;RemoteAccess;
 Terminal=false
