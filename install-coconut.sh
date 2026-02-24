@@ -334,6 +334,20 @@ chmod 644 /usr/share/applications/coconut-browser.desktop
 
 info "Created desktop launcher (find 'Coconut' in your app menu)"
 
+# ── Open firewall port ───────────────────────────────────────────────────────
+step "Configuring firewall"
+
+if command -v ufw &>/dev/null; then
+    ufw allow "$LISTEN_PORT"/tcp comment "Coconut TLS Proxy" 2>/dev/null
+    info "Opened port $LISTEN_PORT/tcp in ufw"
+elif command -v firewall-cmd &>/dev/null; then
+    firewall-cmd --permanent --add-port="$LISTEN_PORT"/tcp 2>/dev/null
+    firewall-cmd --reload 2>/dev/null
+    info "Opened port $LISTEN_PORT/tcp in firewalld"
+else
+    info "No firewall detected — port $LISTEN_PORT should be open"
+fi
+
 # ── Get LAN IP ───────────────────────────────────────────────────────────────
 LAN_IP=$(python3 -c "
 import socket

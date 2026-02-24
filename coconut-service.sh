@@ -170,6 +170,20 @@ chmod +x /usr/local/bin/coconut-browser
 
 info "Commands: coconut-proxy, coconut-browser"
 
+# ── Open firewall port ───────────────────────────────────────────────────────
+step "Configuring firewall"
+
+if command -v ufw &>/dev/null; then
+    ufw allow "$LISTEN_PORT"/tcp comment "Coconut TLS Proxy" 2>/dev/null
+    info "Opened port $LISTEN_PORT/tcp in ufw"
+elif command -v firewall-cmd &>/dev/null; then
+    firewall-cmd --permanent --add-port="$LISTEN_PORT"/tcp 2>/dev/null
+    firewall-cmd --reload 2>/dev/null
+    info "Opened port $LISTEN_PORT/tcp in firewalld"
+else
+    info "No firewall detected — port $LISTEN_PORT should be open"
+fi
+
 # ── Status ───────────────────────────────────────────────────────────────────
 step "Status"
 
